@@ -2,6 +2,12 @@
 /**
  * Cron Registration Manager
  *
+ * A comprehensive solution for managing WordPress cron jobs with features like:
+ * - Plugin-specific job management
+ * - Custom schedule registration
+ * - Job installation and uninstallation
+ * - Error logging and debugging
+ *
  * @package     ArrayPress\WP\Register
  * @copyright   Copyright (c) 2024, ArrayPress Limited
  * @license     GPL2+
@@ -15,25 +21,46 @@ namespace ArrayPress\WP\Register;
 // Exit if accessed directly
 defined( 'ABSPATH' ) || exit;
 
+use InvalidArgumentException;
+
 /**
  * Class Cron
  *
  * Manages WordPress cron job registration and scheduling.
  *
- * @since 1.0.0
+ * @package ArrayPress\WP\Register
+ * @since   1.0.0
  */
 class Cron {
 
 	/**
-	 * Instance of this class.
+	 * Collection of class instances
 	 *
-	 * @var self|null
+	 * @since 1.0.0
+	 * @var self[] Array of instances, keyed by plugin basename
 	 */
-	private static ?self $instance = null;
+	private static array $instances = [];
+
+	/**
+	 * Plugin file path
+	 *
+	 * @since 1.0.0
+	 * @var string
+	 */
+	private string $plugin_file = '';
+
+	/**
+	 * Plugin basename
+	 *
+	 * @since 1.0.0
+	 * @var string
+	 */
+	private string $basename = '';
 
 	/**
 	 * Collection of schedules to be registered
 	 *
+	 * @since 1.0.0
 	 * @var array
 	 */
 	private array $schedules = [];
@@ -41,6 +68,7 @@ class Cron {
 	/**
 	 * Collection of cron jobs to be registered
 	 *
+	 * @since 1.0.0
 	 * @var array
 	 */
 	private array $jobs = [];
@@ -48,6 +76,7 @@ class Cron {
 	/**
 	 * Option prefix for storing cron data
 	 *
+	 * @since 1.0.0
 	 * @var string
 	 */
 	private string $prefix = '';
@@ -55,30 +84,46 @@ class Cron {
 	/**
 	 * Debug mode status
 	 *
+	 * @since 1.0.0
 	 * @var bool
 	 */
 	private bool $debug = false;
 
 	/**
-	 * Get instance of this class.
+	 * Get instance for a plugin
 	 *
-	 * @return self Instance of this class.
+	 * @param string $plugin_file Plugin file path
+	 *
+	 * @return self Instance of this class
+	 * @throws InvalidArgumentException If plugin file path is empty
+	 * @since  1.0.0
 	 */
-	public static function instance(): self {
-		if ( null === self::$instance ) {
-			self::$instance = new self();
+	public static function instance( string $plugin_file ): self {
+		if ( empty( $plugin_file ) ) {
+			throw new InvalidArgumentException( 'Plugin file path must be provided.' );
 		}
 
-		return self::$instance;
+		$basename = plugin_basename( $plugin_file );
+
+		if ( ! isset( self::$instances[ $basename ] ) ) {
+			self::$instances[ $basename ] = new self( $plugin_file );
+		}
+
+		return self::$instances[ $basename ];
 	}
 
 	/**
 	 * Constructor
 	 *
-
+	 * @param string $plugin_file Plugin file path
+	 *
+	 * @since 1.0.0
 	 */
-	private function __construct() {
-		$this->debug = defined( 'WP_DEBUG' ) && WP_DEBUG;
+	private function __construct( string $plugin_file ) {
+		$this->plugin_file = $plugin_file;
+		$this->basename    = plugin_basename( $plugin_file );
+		$this->debug       = defined( 'WP_DEBUG' ) && WP_DEBUG;
+
 		add_filter( 'cron_schedules', [ $this, 'add_custom_schedules' ] );
 	}
 
@@ -88,6 +133,7 @@ class Cron {
 	 * @param string $prefix The prefix to use
 	 *
 	 * @return self
+	 * @since  1.0.0
 	 */
 	public function set_prefix( string $prefix ): self {
 		$this->prefix = $prefix;
@@ -101,6 +147,7 @@ class Cron {
 	 * @param array $schedules Array of WordPress schedules
 	 *
 	 * @return array Modified schedules array
+	 * @since  1.0.0
 	 */
 	public function add_custom_schedules( array $schedules ): array {
 		return array_merge( $schedules, $this->schedules );
@@ -112,6 +159,7 @@ class Cron {
 	 * @param array $schedules Array of schedules
 	 *
 	 * @return self
+	 * @since  1.0.0
 	 */
 	public function add_schedules( array $schedules ): self {
 		foreach ( $schedules as $name => $schedule ) {
@@ -128,6 +176,7 @@ class Cron {
 	 * @param array  $schedule Schedule configuration
 	 *
 	 * @return self
+	 * @since  1.0.0
 	 */
 	public function add_schedule( string $name, array $schedule ): self {
 		if ( ! $this->is_valid_name( $name ) ) {
@@ -148,7 +197,8 @@ class Cron {
 			return $this;
 		}
 
-		$this->schedules[ $this->maybe_prefix_name( $name ) ] = [
+		$prefixed_name                     = $this->maybe_prefix_name( $name );
+		$this->schedules[ $prefixed_name ] = [
 			'interval' => (int) $schedule['interval'],
 			'display'  => $schedule['display']
 		];
@@ -162,6 +212,7 @@ class Cron {
 	 * @param array $jobs Array of cron jobs
 	 *
 	 * @return self
+	 * @since  1.0.0
 	 */
 	public function add_jobs( array $jobs ): self {
 		foreach ( $jobs as $hook => $job ) {
@@ -178,6 +229,7 @@ class Cron {
 	 * @param array  $job  Job configuration
 	 *
 	 * @return self
+	 * @since  1.0.0
 	 */
 	public function add_job( string $hook, array $job ): self {
 		if ( ! $this->is_valid_name( $hook ) ) {
@@ -192,7 +244,8 @@ class Cron {
 			return $this;
 		}
 
-		$this->jobs[ $this->maybe_prefix_name( $hook ) ] = wp_parse_args( $job, [
+		$prefixed_hook                = $this->maybe_prefix_name( $hook );
+		$this->jobs[ $prefixed_hook ] = wp_parse_args( $job, [
 			'callback' => null,
 			'schedule' => false, // false for single event, string for recurring
 			'start'    => time(),
@@ -205,7 +258,8 @@ class Cron {
 	/**
 	 * Install cron jobs
 	 *
-	 * @return bool
+	 * @return bool Success status
+	 * @since  1.0.0
 	 */
 	public function install(): bool {
 		if ( empty( $this->jobs ) ) {
@@ -244,7 +298,8 @@ class Cron {
 	/**
 	 * Uninstall cron jobs
 	 *
-	 * @return bool
+	 * @return bool Success status
+	 * @since  1.0.0
 	 */
 	public function uninstall(): bool {
 		foreach ( $this->jobs as $hook => $job ) {
@@ -266,6 +321,7 @@ class Cron {
 	 * Store installation flag
 	 *
 	 * @return void
+	 * @since 1.0.0
 	 */
 	protected function store_installation_flag(): void {
 		update_option( $this->get_option_key( 'cron_installed' ), true );
@@ -275,6 +331,7 @@ class Cron {
 	 * Delete installation flag
 	 *
 	 * @return void
+	 * @since 1.0.0
 	 */
 	protected function delete_installation_flag(): void {
 		delete_option( $this->get_option_key( 'cron_installed' ) );
@@ -286,6 +343,7 @@ class Cron {
 	 * @param string $name Name to validate
 	 *
 	 * @return bool Whether the name is valid
+	 * @since  1.0.0
 	 */
 	protected function is_valid_name( string $name ): bool {
 		return (bool) preg_match( '/^[a-z0-9_-]+$/', $name );
@@ -297,9 +355,14 @@ class Cron {
 	 * @param string $name Name to maybe prefix
 	 *
 	 * @return string Possibly prefixed name
+	 * @since  1.0.0
 	 */
 	protected function maybe_prefix_name( string $name ): string {
-		return empty( $this->prefix ) ? $name : "{$this->prefix}_{$name}";
+		if ( empty( $this->prefix ) ) {
+			return $this->basename . '_' . $name;
+		}
+
+		return $this->prefix . '_' . $name;
 	}
 
 	/**
@@ -308,9 +371,14 @@ class Cron {
 	 * @param string $key Option key
 	 *
 	 * @return string Prefixed option key
+	 * @since  1.0.0
 	 */
 	protected function get_option_key( string $key ): string {
-		return empty( $this->prefix ) ? $key : "{$this->prefix}_{$key}";
+		if ( empty( $this->prefix ) ) {
+			return $this->basename . '_' . $key;
+		}
+
+		return $this->prefix . '_' . $key;
 	}
 
 	/**
@@ -320,13 +388,14 @@ class Cron {
 	 * @param array  $context Optional context
 	 *
 	 * @return void
+	 * @since  1.0.0
 	 */
 	protected function log( string $message, array $context = [] ): void {
 		if ( $this->debug ) {
-			$prefix = $this->prefix ? "[{$this->prefix}] " : '';
+			$identifier = empty( $this->prefix ) ? $this->basename : $this->prefix;
 			error_log( sprintf(
-				'%sCron: %s %s',
-				$prefix,
+				'[%s] Cron: %s %s',
+				$identifier,
 				$message,
 				$context ? json_encode( $context ) : ''
 			) );
@@ -336,35 +405,64 @@ class Cron {
 	/**
 	 * Helper method to register cron schedules and jobs
 	 *
-	 * @param array  $schedules Array of schedules to register
-	 * @param array  $jobs      Array of jobs to register
-	 * @param string $prefix    Optional prefix
+	 * @param string $plugin_file Plugin file path
+	 * @param array  $schedules   Array of schedules to register
+	 * @param array  $jobs        Array of jobs to register
+	 * @param string $prefix      Optional prefix
 	 *
-	 * @return bool
+	 * @return bool Success status
+	 * @since  1.0.0
 	 */
-	public static function register( array $schedules = [], array $jobs = [], string $prefix = '' ): bool {
-		return self::instance()
-		           ->set_prefix( $prefix )
-		           ->add_schedules( $schedules )
-		           ->add_jobs( $jobs )
-		           ->install();
+	public static function register(
+		string $plugin_file,
+		array $schedules = [],
+		array $jobs = [],
+		string $prefix = ''
+	): bool {
+		try {
+			return self::instance( $plugin_file )
+			           ->set_prefix( $prefix )
+			           ->add_schedules( $schedules )
+			           ->add_jobs( $jobs )
+			           ->install();
+		} catch ( InvalidArgumentException $e ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'Cron registration failed: %s', $e->getMessage() ) );
+			}
+
+			return false;
+		}
 	}
 
 	/**
 	 * Helper method to unregister cron jobs
 	 *
-	 * @param array  $schedules Array of schedules to unregister
-	 * @param array  $jobs      Array of jobs to unregister
-	 * @param string $prefix    Optional prefix
+	 * @param string $plugin_file Plugin file path
+	 * @param array  $schedules   Array of schedules to unregister
+	 * @param array  $jobs        Array of jobs to unregister
+	 * @param string $prefix      Optional prefix
 	 *
-	 * @return bool
+	 * @return bool Success status
+	 * @since  1.0.0
 	 */
-	public static function unregister( array $schedules = [], array $jobs = [], string $prefix = '' ): bool {
-		return self::instance()
-		           ->set_prefix( $prefix )
-		           ->add_schedules( $schedules )
-		           ->add_jobs( $jobs )
-		           ->uninstall();
-	}
+	public static function unregister(
+		string $plugin_file,
+		array $schedules = [],
+		array $jobs = [],
+		string $prefix = ''
+	): bool {
+		try {
+			return self::instance( $plugin_file )
+			           ->set_prefix( $prefix )
+			           ->add_schedules( $schedules )
+			           ->add_jobs( $jobs )
+			           ->uninstall();
+		} catch ( InvalidArgumentException $e ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'Cron unregistration failed: %s', $e->getMessage() ) );
+			}
 
+			return false;
+		}
+	}
 }
