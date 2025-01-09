@@ -10,6 +10,7 @@ A comprehensive PHP library for registering and managing WordPress cron jobs and
 - 🛠️ Simple utility functions for quick implementation
 - ✅ Comprehensive error handling
 - 🔍 Debug logging support
+- 🔐 Plugin-specific isolation for multi-plugin environments
 
 ## Requirements
 
@@ -31,33 +32,36 @@ Here's a simple example of registering custom schedules and cron jobs:
 ```php
 // Register custom schedule intervals
 $schedules = [
-	'twice_daily'   => [
-		'interval' => 12 * HOUR_IN_SECONDS,
-		'display'  => 'Twice Daily'
-	],
-	'every_6_hours' => [
-		'interval' => 6 * HOUR_IN_SECONDS,
-		'display'  => 'Every 6 Hours'
-	]
+    'twice_daily' => [
+        'interval' => 12 * HOUR_IN_SECONDS,
+        'display'  => 'Twice Daily'
+    ],
+    'every_6_hours' => [
+        'interval' => 6 * HOUR_IN_SECONDS,
+        'display'  => 'Every 6 Hours'
+    ]
 ];
 
-register_cron_schedules( $schedules, 'my_plugin' );
+register_cron_schedules(__FILE__, $schedules, 'my_plugin');
 
 // Register cron jobs
 $jobs = [
-	'sync_data' => [
-		'callback' => 'sync_data_function',
-		'schedule' => 'my_plugin_twice_daily',
-		'args'     => [ 'param1', 'param2' ]
-	],
-	'cleanup'   => [
-		'callback' => 'cleanup_function',
-		'schedule' => false, // Single event
-		'start'    => time() + HOUR_IN_SECONDS
-	]
+    'sync_data' => [
+        'callback' => 'sync_data_function',
+        'schedule' => 'my_plugin_twice_daily',
+        'args'     => ['param1', 'param2']
+    ],
+    'cleanup' => [
+        'callback' => 'cleanup_function',
+        'schedule' => false, // Single event
+        'start'    => time() + HOUR_IN_SECONDS
+    ]
 ];
 
-register_cron_jobs( $jobs, 'my_plugin' );
+register_cron_jobs(__FILE__, $jobs, 'my_plugin');
+
+// Or register both at once
+register_cron(__FILE__, $schedules, $jobs, 'my_plugin');
 ```
 
 ## Configuration Options
@@ -88,13 +92,16 @@ Global helper functions for easy access:
 
 ```php
 // Register custom schedules
-register_cron_schedules( $schedules, 'prefix' );
+register_cron_schedules(__FILE__, $schedules, 'prefix');
 
 // Register cron jobs
-register_cron_jobs( $jobs, 'prefix' );
+register_cron_jobs(__FILE__, $jobs, 'prefix');
 
 // Unregister cron jobs
-unregister_cron_jobs( $jobs, 'prefix' );
+unregister_cron_jobs(__FILE__, $jobs, 'prefix');
+
+// Register both schedules and jobs at once
+register_cron(__FILE__, $schedules, $jobs, 'prefix');
 ```
 
 ## Using the Class Directly
@@ -104,23 +111,27 @@ For more advanced usage, you can use the class directly:
 ```php
 use ArrayPress\WP\Register\Cron;
 
-$cron = Cron::instance();
+// Get instance for this plugin
+$cron = Cron::instance(__FILE__);
+
+// Optional: Set custom prefix
+$cron->set_prefix('my_plugin');
 
 // Add custom schedules
-$cron->add_schedules( [
-	'custom_interval' => [
-		'interval' => 3600,
-		'display'  => 'Every Hour'
-	]
-] );
+$cron->add_schedules([
+    'custom_interval' => [
+        'interval' => 3600,
+        'display'  => 'Every Hour'
+    ]
+]);
 
 // Add cron jobs
-$cron->add_jobs( [
-	'hourly_task' => [
-		'callback' => [ $this, 'hourly_function' ],
-		'schedule' => 'custom_interval'
-	]
-] );
+$cron->add_jobs([
+    'hourly_task' => [
+        'callback' => [$this, 'hourly_function'],
+        'schedule' => 'custom_interval'
+    ]
+]);
 
 // Install everything
 $cron->install();
@@ -128,49 +139,64 @@ $cron->install();
 
 ## Advanced Example
 
-Here's an example showing more advanced usage:
+Here's an example showing more advanced usage in a plugin class:
 
 ```php
 class MyPlugin {
-	public function init() {
-		// Register custom schedules
-		register_cron_schedules( [
-			'every_4_hours' => [
-				'interval' => 4 * HOUR_IN_SECONDS,
-				'display'  => 'Every 4 Hours'
-			]
-		], 'my_plugin' );
+    public function init() {
+        // Register custom schedules and jobs together
+        register_cron(
+            __FILE__,
+            [
+                'every_4_hours' => [
+                    'interval' => 4 * HOUR_IN_SECONDS,
+                    'display'  => 'Every 4 Hours'
+                ]
+            ],
+            [
+                'data_sync' => [
+                    'callback' => [$this, 'sync_data'],
+                    'schedule' => 'my_plugin_every_4_hours',
+                    'args'     => ['full_sync' => false]
+                ],
+                'daily_report' => [
+                    'callback' => [$this, 'generate_report'],
+                    'schedule' => 'daily',
+                    'start'    => strtotime('tomorrow 1am')
+                ],
+                'one_time_cleanup' => [
+                    'callback' => [$this, 'perform_cleanup'],
+                    'schedule' => false, // Single event
+                    'start'    => time() + DAY_IN_SECONDS
+                ]
+            ],
+            'my_plugin'
+        );
+    }
 
-		// Register various cron jobs
-		register_cron_jobs( [
-			'data_sync'        => [
-				'callback' => [ $this, 'sync_data' ],
-				'schedule' => 'my_plugin_every_4_hours',
-				'args'     => [ 'full_sync' => false ]
-			],
-			'daily_report'     => [
-				'callback' => [ $this, 'generate_report' ],
-				'schedule' => 'daily',
-				'start'    => strtotime( 'tomorrow 1am' )
-			],
-			'one_time_cleanup' => [
-				'callback' => [ $this, 'perform_cleanup' ],
-				'schedule' => false, // Single event
-				'start'    => time() + DAY_IN_SECONDS
-			]
-		], 'my_plugin' );
-	}
-
-	public function deactivate() {
-		// Clean up cron jobs on deactivation
-		unregister_cron_jobs( [
-			'data_sync',
-			'daily_report',
-			'one_time_cleanup'
-		], 'my_plugin' );
-	}
+    public function deactivate() {
+        // Clean up cron jobs on deactivation
+        unregister_cron_jobs(
+            __FILE__,
+            [
+                'data_sync',
+                'daily_report',
+                'one_time_cleanup'
+            ],
+            'my_plugin'
+        );
+    }
 }
 ```
+
+## Prefixing and Plugin Isolation
+
+The library uses two levels of isolation:
+
+1. Plugin File (`__FILE__`): Ensures each plugin maintains its own isolated instance of the cron manager
+2. Prefix (optional): Creates unique identifiers for cron hooks and options
+
+If no prefix is provided, the plugin's basename will be used as the prefix automatically.
 
 ## Debug Mode
 
