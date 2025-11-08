@@ -19,7 +19,7 @@
       "ArrayPress\\WP\\Register\\": "src/"
     },
     "files": [
-      "src/Utilities.php"
+      "src/Functions.php"
     ]
   },
   "config": {
